@@ -1,0 +1,187 @@
+/***
+ * This program uses a Markov matrix to simulate the probabilities of landing on any given space in
+ * The Landlord's Game, the predecessor to the board game Monopoly.
+ * Adapted from: http://www.tkcs-collins.com/truman/monopoly/mon_mark.c Accessed 3/23/2022.
+ * */
+ 
+import java.util.*;
+
+public class LandlordSimulator {
+    // List of names for each space.
+    String[] spaces;
+    
+    // The primary Markov matrix.
+    double[][] matrix;
+    
+    // The probabilities of rolling any number with two dice.
+    double[] rollProbability;
+    
+    // Note whether the player is in jail on this turn.
+    boolean inJail;
+    
+    // The eigenvector for the given number of terms.
+    double[] eigenvector;
+    
+    // constants
+    final double oneThirtysixth = 1/36.0;
+    final double oneFourth = 0.25;
+    final int numSpaces = 40;
+    final int jailIndex = 40;
+    final int justVisiting = 10;
+    final int rr1 = 5;
+    final int rr2 = 15;
+    final int rr3 = 25;
+    final int rr4 = 35;
+    
+    // Creates new simulator and initializes required variables.
+    public LandlordSimulator() {
+        spaces = new String[] {"go", "rent1", "bread_Necessity", "rent2", "gtj1", "RR1",
+                        "rent3", "rent4", "luxury1", "rent5", "just_Visiting", "rent6", "rent7", "light_franchise",
+                        "rent8", "RR2", "rent9", "shelter_Necessity", "rent10", "rent11", "park", "rent12", "luxury2",
+                        "rent13", "rent14", "RR3", "rent15", "water_franchise", "rent16", "rent17", "gtj2", "rent18", 
+                        "clothes_Necessity", "rent19", "rent20", "RR4", "rent21", "legacy", "rent22", "luxury3", "jail"};
+        
+        // Zero out probability matrix
+        matrix = new double[spaces.length][spaces.length];
+        eigenvector = new double[spaces.length];
+        
+        // Calculate the probability of rolling any number with two dice
+        rollProbability = new double[13];
+        rollProbability[0] = 0;
+        for (int i = 1; i < 6; i++) {
+            double probability = i * oneThirtysixth;
+            rollProbability[i + 1] = probability;
+            rollProbability[13 - i] = probability;
+        }
+    }
+    
+    private int modIndex(int i) {
+        return i % numSpaces;
+    }
+    
+    // Handles railroads. If the new space is a railroad, increase the probability
+    // of switching to any other railroad by one-fourth the probability of landing
+    // on this railroad, and reduce the probability of staying on this railroad by
+    // the same.
+    private void switchRailroads(int currentSpace, int newSpace) {
+        double adjustedFourth = matrix[currentSpace][newSpace] * oneFourth;
+        double threeFourths = matrix[currentSpace][newSpace] * .75;
+        if (newSpace == rr1) {
+            matrix[currentSpace][rr1] -= threeFourths;
+            matrix[currentSpace][rr2] += adjustedFourth;
+            matrix[currentSpace][rr3] += adjustedFourth;
+            matrix[currentSpace][rr4] += adjustedFourth;
+        }
+        else if (newSpace == rr2) {
+            matrix[currentSpace][rr1] += adjustedFourth;
+            matrix[currentSpace][rr2] -= threeFourths;
+            matrix[currentSpace][rr3] += adjustedFourth;
+            matrix[currentSpace][rr4] += adjustedFourth;
+        }
+        else if (newSpace == rr3) {
+            matrix[currentSpace][rr1] += adjustedFourth;
+            matrix[currentSpace][rr2] += adjustedFourth;
+            matrix[currentSpace][rr3] -= threeFourths;
+            matrix[currentSpace][rr4] += adjustedFourth;
+        }
+        else if (newSpace == rr4) {
+            matrix[currentSpace][rr1] += adjustedFourth;
+            matrix[currentSpace][rr2] += adjustedFourth;
+            matrix[currentSpace][rr3] += adjustedFourth;
+            matrix[currentSpace][rr4] -= threeFourths;
+        }
+    }
+    
+    // Calculate the matrix for the given number of turns.
+    private void runMatrix() {
+        int currentSpace;       // the current space we've landed on
+        int newSpace;           // the space for the next iteration
+        
+        // Roll and update probabilities
+        for (int i = 0; i < numSpaces; i++) {
+            currentSpace = i;
+            
+            // Calculate probabilities for landing on any given square.
+            for (int j = 2; j < 13; j++) {
+                newSpace = modIndex(currentSpace + j);
+                matrix[currentSpace][newSpace] += rollProbability[j];
+                
+                // Handle trespassing cases
+                if (newSpace == 4 || newSpace == 30) {
+                    inJail = true;
+                    matrix[currentSpace][jailIndex] += matrix[currentSpace][newSpace];
+                    matrix[currentSpace][newSpace] = 0;
+                }
+                
+                // Handle landing on railroads
+                switchRailroads(currentSpace, newSpace);
+            }
+        }
+        
+        // Now calculate probabilities for if the player leaves by paying as soon as they enter jail
+        for (int j = 2; j < 13; j++) {
+            newSpace = j + justVisiting;
+            matrix[jailIndex][newSpace] += rollProbability[j];
+        }
+    }
+    
+    // Calculate the eigenvector.
+    public void getEigenvector(int turns) {
+        int n = 0;
+        double[] newSpaceProb = new double[41];
+        double[] prevSpaceProb = new double[41];
+        double[] totalSpaceProb = new double[41];
+        
+        for (int i = 0; i < 41; i++) {
+            newSpaceProb[i] = 0;
+            prevSpaceProb[i] = 0;
+        }
+        
+        prevSpaceProb[0] = 1;
+        do {
+            for (int i = 0; i < 41; i++) newSpaceProb[i] = 0;
+            for (int i = 0; i < 41; i++) {
+                for (int j = 0; j < 41; j++) {
+                    newSpaceProb[j] += matrix[i][j] * prevSpaceProb[i];
+                }
+            }
+            for (int i = 0; i < 41; i++) {
+                prevSpaceProb[i] = newSpaceProb[i];
+                totalSpaceProb[i] += newSpaceProb[i];
+            }
+            n++;
+        } while (n < turns);
+        
+        // Copy to eigenvector.
+        for (int i = 0; i < 41; i++) eigenvector[i] = totalSpaceProb[i];
+    }
+    
+    public String getProbabilities() {
+        Map<String, String> tm = new TreeMap<String, String>();
+        for (int i = 0; i < spaces.length; i++) {
+            if (tm.containsKey(eigenvector[i] + "")) tm.put(eigenvector[i] + "\n" + i, spaces[i]);
+            else tm.put(eigenvector[i] + "", spaces[i]);
+        }
+        
+        StringBuilder sb = new StringBuilder("Space Name | Probability\n");
+        for (Map.Entry<String, String> ent : tm.entrySet()) {
+            double key;
+            if (ent.getKey().indexOf("\n") >= 0) key = Double.parseDouble(ent.getKey().split("\n")[0]);
+            else key = Double.parseDouble(ent.getKey());
+            int temp = (int)(key * 10000.0);
+            double shortProb = ((double)temp)/10000.0;
+            sb.append(ent.getValue() + " | " + shortProb + "\n");
+        }
+        return sb.toString();
+    }
+    
+    public static void main(String args[]) {
+        int n = Integer.parseInt(args[0]);
+        
+        System.out.println("Running simulations leaving jail for " + n + " turns.\n");
+        LandlordSimulator ls = new LandlordSimulator();
+        ls.runMatrix();
+        ls.getEigenvector(n);
+        System.out.println(ls.getProbabilities());
+    }
+}
